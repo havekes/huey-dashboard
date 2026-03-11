@@ -9,7 +9,7 @@ router = APIRouter()
 @router.websocket("/")
 async def websocket_endpoint(
     websocket: WebSocket, manager: WebSocketManager = Depends(get_websocket_manager)
-):
+) -> None:
     await manager.connect(websocket)
     try:
         while True:

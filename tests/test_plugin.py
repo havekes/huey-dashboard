@@ -61,9 +61,7 @@ def test_plugin_init_custom_prefix(mock_huey, mock_db):
 def test_plugin_state_storage(mock_huey, mock_db):
     app = FastAPI()
     mock_redis = MagicMock()
-    init_huey_dashboard(
-        app, huey=mock_huey, db_connection=mock_db, redis=mock_redis
-    )
+    init_huey_dashboard(app, huey=mock_huey, db_connection=mock_db, redis=mock_redis)
 
     assert hasattr(app.state, "huey_dashboard")
     assert app.state.huey_dashboard["huey"] == mock_huey
@@ -77,7 +75,7 @@ def test_plugin_websocket_endpoint(mock_huey, mock_db):
     init_huey_dashboard(app, huey=mock_huey, db_connection=mock_db, api_prefix="/huey")
 
     client = TestClient(app)
-    with client.websocket_connect("/huey/updates/") as websocket:
+    with client.websocket_connect("/huey/updates/"):
         # Note: Current websocket echo implementation in websockets.py might still exist
         # We are just testing connection here.
         pass

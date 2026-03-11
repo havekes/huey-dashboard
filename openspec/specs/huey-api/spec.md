@@ -21,3 +21,14 @@ The system SHALL provide an endpoint to fetch detailed information about a speci
 - **WHEN** a client sends a GET request with an invalid or non-existent task ID
 - **THEN** the system returns a 404 Not Found response
 
+### Requirement: Legacy Fallback Support
+The system SHALL support legacy list and detail task fetching by falling back to querying the Huey queue directly if no database connection is configured.
+
+#### Scenario: Fallback list query
+- **WHEN** the database is not configured and a client requests the task list
+- **THEN** the system returns pending and scheduled tasks directly from the Huey queue
+
+#### Scenario: Fallback detail query
+- **WHEN** the database is not configured and a client requests details for a specific task ID
+- **THEN** the system searches the Huey queue and result store to fulfill the request
+

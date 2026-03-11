@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+
 from huey_dashboard.models.task import TaskInfo
 from huey_dashboard.services.database import TaskDatabase
 

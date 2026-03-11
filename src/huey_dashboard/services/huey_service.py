@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Any
 
 from huey import RedisHuey
 
@@ -7,7 +7,7 @@ from .database import TaskDatabase
 
 
 class HueyService:
-    def __init__(self, huey: RedisHuey, db: Optional[TaskDatabase] = None):
+    def __init__(self, huey: RedisHuey, db: TaskDatabase | None = None) -> None:
         self.huey = huey
         self.db = db
 
@@ -43,7 +43,7 @@ class HueyService:
             )
         return tasks
 
-    def get_task_details(self, task_id: str) -> Optional[TaskInfo]:
+    def get_task_details(self, task_id: str) -> TaskInfo | None:
         """
         Get task details from the database.
         Falls back to Huey's result store/queue if database is not available.
@@ -82,5 +82,5 @@ class HueyService:
 
 
 # Deprecated: periodic polling is replaced by event-driven signals
-async def poll_huey_updates(huey, manager):
+async def poll_huey_updates(huey: Any, manager: Any) -> None:
     pass

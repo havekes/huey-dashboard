@@ -1,6 +1,6 @@
-from starlette.requests import HTTPConnection
 from huey import RedisHuey
 from redis import Redis
+from starlette.requests import HTTPConnection
 
 from ..services.database import TaskDatabase
 from ..services.websocket_manager import WebSocketManager

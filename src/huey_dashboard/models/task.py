@@ -7,7 +7,7 @@ class TaskInfo(BaseModel):
     id: str
     name: str
     status: str
-    args: tuple | None = None
-    kwargs: dict | None = None
+    args: tuple[Any, ...] | None = None
+    kwargs: dict[str, Any] | None = None
     result: Any | None = None
     error: str | None = None

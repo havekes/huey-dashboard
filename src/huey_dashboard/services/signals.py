@@ -1,5 +1,5 @@
 import json
-from typing import Any, Optional
+from typing import Any
 
 from huey import RedisHuey
 from huey.signals import (
@@ -19,8 +19,8 @@ from .database import TaskDatabase
 
 
 def register_signal_handlers(
-    huey: RedisHuey, db: TaskDatabase, redis: Optional[Redis] = None
-):
+    huey: RedisHuey, db: TaskDatabase, redis: Redis | None = None
+) -> None:
     """
     Register signal handlers for Huey task lifecycle events.
     When an event occurs, we update the task state in the database
@@ -37,7 +37,7 @@ def register_signal_handlers(
         SIGNAL_REVOKED,
         SIGNAL_INTERRUPTED,
     )
-    def handle_task_event(signal: str, task: Any, exc: Optional[Exception] = None):
+    def handle_task_event(signal: str, task: Any, exc: Exception | None = None) -> None:
         # Map signal to status
         status = signal.replace("huey.signal.", "").lower()
 
