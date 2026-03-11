@@ -1,13 +1,13 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+    FastAPI plugin library integrated via an init_huey_dashboard(app, huey, redis, ...) pattern.
+    Exposes API endpoints and WebSocket connections for real-time task updates.
+    It bridges Huey background tasks to WebSockets using direct signals for local development
+    and Redis Pub/Sub for production to manage cross-process worker communication.
+
+    Tech stack: FastApi, Huey, Redis
+    Code quality: ruff, ty, pytest
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.
