@@ -1,134 +1,125 @@
-import json
+import asyncio
 from datetime import UTC, datetime
-from typing import Any, Protocol
 
-from pydantic import BaseModel
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    MetaData,
+    String,
+    Table,
+    select,
+)
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..models.task import TaskInfo
 
+metadata = MetaData()
 
-class Database(Protocol):
-    def execute(self, query: str, params: tuple[Any, ...] | None = None) -> Any: ...
-    def fetchone(self, query: str, params: tuple[Any, ...] | None = None) -> Any: ...
-    def fetchall(self, query: str, params: tuple[Any, ...] | None = None) -> Any: ...
-    def commit(self) -> None: ...
-
-
-class TaskRecord(BaseModel):
-    id: str
-    name: str
-    status: str
-    args: str | None = None
-    kwargs: str | None = None
-    result: str | None = None
-    error: str | None = None
-    timestamp: datetime
+huey_tasks = Table(
+    "huey_tasks",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("name", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("args", JSON),
+    Column("kwargs", JSON),
+    Column("result", JSON),
+    Column("error", String),
+    Column("timestamp", DateTime(timezone=True), nullable=False),
+)
 
 
 class TaskDatabase:
-    def __init__(self, db_connection: Any) -> None:
+    def __init__(self, engine: AsyncEngine) -> None:
         """
-        :param db_connection: A PostgreSQL connection object
-                              (e.g. from psycopg or asyncpg).
-                              For now, we assume a synchronous
-                              DB-API 2.0 compatible connection
-                              provided by the host application.
+        :param engine: A SQLAlchemy AsyncEngine instance.
         """
-        self.conn = db_connection
-        self._ensure_table()
+        self.engine = engine
+        self._table_ensured = False
+        self._lock: asyncio.Lock | None = None
 
-    def _ensure_table(self) -> None:
-        query = """
-        CREATE TABLE IF NOT EXISTS huey_tasks (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            status TEXT NOT NULL,
-            args TEXT,
-            kwargs TEXT,
-            result TEXT,
-            error TEXT,
-            timestamp TIMESTAMPTZ NOT NULL
-        );
-        """
-        with self.conn.cursor() as cur:
-            cur.execute(query)
-        self.conn.commit()
+    async def ensure_table(self) -> None:
+        if self._table_ensured:
+            return
 
-    def upsert_task(self, task_info: TaskInfo) -> None:
-        query = """
-        INSERT INTO huey_tasks (
-            id, name, status, args, kwargs, result, error, timestamp
-        )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (id) DO UPDATE SET
-            status = EXCLUDED.status,
-            result = EXCLUDED.result,
-            error = EXCLUDED.error,
-            timestamp = EXCLUDED.timestamp;
-        """
-        args_json = json.dumps(task_info.args) if task_info.args else None
-        kwargs_json = json.dumps(task_info.kwargs) if task_info.kwargs else None
-        result_json = (
-            json.dumps(task_info.result) if task_info.result is not None else None
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
+        async with self._lock:
+            # Re-check after acquiring lock
+            if self._table_ensured:
+                return
+
+            async with self.engine.begin() as conn:
+                await conn.run_sync(metadata.create_all)
+            self._table_ensured = True
+
+    async def upsert_task(self, task_info: TaskInfo) -> None:
+        await self.ensure_table()
+        stmt = insert(huey_tasks).values(
+            id=task_info.id,
+            name=task_info.name,
+            status=task_info.status,
+            args=task_info.args,
+            kwargs=task_info.kwargs,
+            result=task_info.result,
+            error=task_info.error,
+            timestamp=datetime.now(UTC),
         )
 
-        params = (
-            task_info.id,
-            task_info.name,
-            task_info.status,
-            args_json,
-            kwargs_json,
-            result_json,
-            task_info.error,
-            datetime.now(UTC),
+        update_stmt = stmt.on_conflict_do_update(
+            index_elements=["id"],
+            set_={
+                "status": stmt.excluded.status,
+                "result": stmt.excluded.result,
+                "error": stmt.excluded.error,
+                "timestamp": stmt.excluded.timestamp,
+            },
         )
 
-        with self.conn.cursor() as cur:
-            cur.execute(query, params)
-        self.conn.commit()
+        async with self.engine.begin() as conn:
+            await conn.execute(update_stmt)
 
-    def get_all_tasks(self) -> list[TaskInfo]:
-        query = (
-            "SELECT id, name, status, args, kwargs, result, error "
-            "FROM huey_tasks ORDER BY timestamp DESC"
-        )
-        with self.conn.cursor() as cur:
-            cur.execute(query)
-            rows = cur.fetchall()
+    async def get_all_tasks(self) -> list[TaskInfo]:
+        await self.ensure_table()
+        query = select(huey_tasks).order_by(huey_tasks.c.timestamp.desc())
+        async with self.engine.begin() as conn:
+            result = await conn.execute(query)
+            rows = result.all()
 
         tasks = []
         for row in rows:
             tasks.append(
                 TaskInfo(
-                    id=row[0],
-                    name=row[1],
-                    status=row[2],
-                    args=json.loads(row[3]) if row[3] else None,
-                    kwargs=json.loads(row[4]) if row[4] else None,
-                    result=json.loads(row[5]) if row[5] else None,
-                    error=row[6],
+                    id=row.id,
+                    name=row.name,
+                    status=row.status,
+                    args=row.args,
+                    kwargs=row.kwargs,
+                    result=row.result,
+                    error=row.error,
                 )
             )
         return tasks
 
-    def get_task(self, task_id: str) -> TaskInfo | None:
-        query = (
-            "SELECT id, name, status, args, kwargs, result, error "
-            "FROM huey_tasks WHERE id = %s"
-        )
-        with self.conn.cursor() as cur:
-            cur.execute(query, (task_id,))
-            row = cur.fetchone()
+    async def get_task(self, task_id: str) -> TaskInfo | None:
+        await self.ensure_table()
+        query = select(huey_tasks).where(huey_tasks.c.id == task_id)
+        async with self.engine.begin() as conn:
+            result = await conn.execute(query)
+            row = result.first()
 
         if not row:
             return None
 
         return TaskInfo(
-            id=row[0],
-            name=row[1],
-            status=row[2],
-            args=json.loads(row[3]) if row[3] else None,
-            kwargs=json.loads(row[4]) if row[4] else None,
-            result=json.loads(row[5]) if row[5] else None,
-            error=row[6],
+            id=row.id,
+            name=row.name,
+            status=row.status,
+            args=row.args,
+            kwargs=row.kwargs,
+            result=row.result,
+            error=row.error,
         )

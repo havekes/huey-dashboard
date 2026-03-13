@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -33,7 +33,7 @@ def test_list_tasks(app, client):
         TaskInfo(id="1", name="task1", status="enqueued"),
         TaskInfo(id="2", name="task2", status="complete"),
     ]
-    db.get_all_tasks.return_value = mock_tasks
+    db.get_all_tasks = AsyncMock(return_value=mock_tasks)
 
     response = client.get("/tasks/")
     assert response.status_code == 200
@@ -46,7 +46,7 @@ def test_list_tasks(app, client):
 def test_get_task_success(app, client):
     db = app.state.huey_dashboard["db"]
     mock_task = TaskInfo(id="1", name="task1", status="enqueued")
-    db.get_task.return_value = mock_task
+    db.get_task = AsyncMock(return_value=mock_task)
 
     response = client.get("/tasks/1")
     assert response.status_code == 200
@@ -56,7 +56,7 @@ def test_get_task_success(app, client):
 
 def test_get_task_not_found(app, client):
     db = app.state.huey_dashboard["db"]
-    db.get_task.return_value = None
+    db.get_task = AsyncMock(return_value=None)
 
     response = client.get("/tasks/non-existent")
     assert response.status_code == 404

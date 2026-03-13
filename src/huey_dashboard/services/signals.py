@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Any
 
@@ -12,14 +13,17 @@ from huey.signals import (
     SIGNAL_REVOKED,
     SIGNAL_SCHEDULED,
 )
-from redis import Redis
+from redis.asyncio import Redis
 
 from ..models.task import TaskInfo
 from .database import TaskDatabase
 
 
 def register_signal_handlers(
-    huey: RedisHuey, db: TaskDatabase, redis: Redis | None = None
+    huey: RedisHuey,
+    db: TaskDatabase,
+    redis: Redis | None = None,
+    app: Any = None,
 ) -> None:
     """
     Register signal handlers for Huey task lifecycle events.
@@ -48,22 +52,37 @@ def register_signal_handlers(
             args=task.args,
             kwargs=task.kwargs,
             error=str(exc) if exc else None,
-            # For SIGNAL_COMPLETE, we might need to fetch the result separately
-            # but usually 'task' object in SIGNAL_COMPLETE doesn't have the result yet.
-            # We can handle result specifically if needed.
         )
 
-        # 1. Persist to PostgreSQL
-        db.upsert_task(task_info)
+        async def _handle():
+            # 1. Persist to PostgreSQL
+            await db.upsert_task(task_info)
 
-        # 2. Publish to Redis Pub/Sub for real-time WebSocket updates
-        if redis:
-            event_data = {
-                "event": f"task_{status}",
-                "task": task_info.model_dump(),
-            }
+            # 2. Publish to Redis Pub/Sub for real-time WebSocket updates
+            if redis:
+                event_data = {
+                    "event": f"task_{status}",
+                    "task": task_info.model_dump(),
+                }
+                try:
+                    await redis.publish("huey_updates", json.dumps(event_data))
+                except Exception:
+                    # Log error in a real app
+                    pass
+
+        # Dispatch the async handler
+        main_loop = None
+        if app and hasattr(app, "state") and hasattr(app.state, "huey_dashboard"):
+            main_loop = app.state.huey_dashboard.get("loop")
+
+        if main_loop and main_loop.is_running():
+            # Schedule on the main loop from any thread
+            main_loop.call_soon_threadsafe(lambda: asyncio.create_task(_handle()))
+        else:
+            # Fallback for when the main loop is not available in this process/context
             try:
-                redis.publish("huey_updates", json.dumps(event_data))
-            except Exception:
-                # Log error in a real app
-                pass
+                loop = asyncio.get_running_loop()
+                loop.create_task(_handle())
+            except RuntimeError:
+                # No running loop in this thread, run it to completion
+                asyncio.run(_handle())

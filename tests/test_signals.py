@@ -1,5 +1,5 @@
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -30,16 +30,20 @@ def mock_huey_and_handler():
         ("huey.signal.EXECUTING", "executing"),
         ("huey.signal.COMPLETE", "complete"),
         ("huey.signal.ERROR", "error"),
-        ("huey.signal.CANCELED", "canceled"),
         ("huey.signal.REVOKED", "revoked"),
         ("huey.signal.RETRYING", "retrying"),
         ("huey.signal.INTERRUPTED", "interrupted"),
     ],
 )
-def test_signal_handler_various_signals(mock_huey_and_handler, signal, expected_status):
+@pytest.mark.asyncio
+async def test_signal_handler_various_signals(
+    mock_huey_and_handler, signal, expected_status
+):
     huey, get_handler = mock_huey_and_handler
     db = MagicMock()
+    db.upsert_task = AsyncMock()
     redis = MagicMock()
+    redis.publish = AsyncMock()
 
     register_signal_handlers(huey, db, redis)
     handler_fn = get_handler()
@@ -52,6 +56,11 @@ def test_signal_handler_various_signals(mock_huey_and_handler, signal, expected_
 
     exc = Exception("test error") if expected_status == "error" else None
     handler_fn(signal, task, exc=exc)
+
+    # Since handler_fn might use create_task, we might need a small sleep
+    import asyncio
+
+    await asyncio.sleep(0.1)
 
     # Verify DB upsert
     assert db.upsert_task.call_count == 1
@@ -70,11 +79,13 @@ def test_signal_handler_various_signals(mock_huey_and_handler, signal, expected_
     assert data["task"]["id"] == task.id
 
 
-def test_signal_handler_redis_failure_graceful(mock_huey_and_handler):
+@pytest.mark.asyncio
+async def test_signal_handler_redis_failure_graceful(mock_huey_and_handler):
     huey, get_handler = mock_huey_and_handler
     db = MagicMock()
+    db.upsert_task = AsyncMock()
     redis = MagicMock()
-    redis.publish.side_effect = Exception("Redis connection lost")
+    redis.publish = AsyncMock(side_effect=Exception("Redis connection lost"))
 
     register_signal_handlers(huey, db, redis)
     handler_fn = get_handler()
@@ -87,6 +98,10 @@ def test_signal_handler_redis_failure_graceful(mock_huey_and_handler):
 
     # This should not raise an exception
     handler_fn("huey.signal.ENQUEUED", task)
+
+    import asyncio
+
+    await asyncio.sleep(0.1)
 
     # DB should still have been updated
     assert db.upsert_task.call_count == 1

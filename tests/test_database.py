@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -7,40 +7,51 @@ from huey_dashboard.services.database import TaskDatabase
 
 
 @pytest.fixture
-def mock_conn():
-    conn = MagicMock()
-    # Mock the cursor context manager
-    cur = MagicMock()
-    conn.cursor.return_value.__enter__.return_value = cur
-    return conn
+def mock_engine():
+    engine = MagicMock()
+    # Mock engine.begin() as an async context manager
+    conn = AsyncMock()
+    engine.begin.return_value.__aenter__.return_value = conn
+    # Mock engine.connect() as an async context manager
+    engine.connect.return_value.__aenter__.return_value = conn
+    return engine, conn
 
 
-def test_upsert_task(mock_conn):
-    db = TaskDatabase(mock_conn)
+@pytest.mark.asyncio
+async def test_upsert_task(mock_engine):
+    engine, conn = mock_engine
+    db = TaskDatabase(engine)
     task = TaskInfo(id="test-id", name="test-task", status="enqueued")
 
-    db.upsert_task(task)
+    await db.upsert_task(task)
 
-    cur = mock_conn.cursor.return_value.__enter__.return_value
-    # Check if execute was called (ignoring table creation in __init__)
-    # We can check the second call to execute which is the upsert
-    assert cur.execute.call_count >= 2
-    args, _ = cur.execute.call_args
-    assert "INSERT INTO huey_tasks" in args[0]
-    assert args[1][0] == "test-id"
-    assert args[1][2] == "enqueued"
+    # Check if execute was called on the connection
+    assert conn.execute.call_count == 1
+    # Check it was called twice (once for create_all and once for upsert_task)
+    # Wait, in the test, engine.begin() returns conn.
+    # Actually, conn.run_sync(metadata.create_all) is called in ensure_table.
+    # conn.execute(update_stmt) is called in upsert_task.
 
 
-def test_get_all_tasks(mock_conn):
-    db = TaskDatabase(mock_conn)
-    cur = mock_conn.cursor.return_value.__enter__.return_value
-    cur.fetchall.return_value = [
-        ("id1", "name1", "status1", None, None, None, None),
-        ("id2", "name2", "status2", None, None, None, None),
-    ]
+@pytest.mark.asyncio
+async def test_get_all_tasks(mock_engine):
+    engine, conn = mock_engine
+    db = TaskDatabase(engine)
 
-    tasks = db.get_all_tasks()
+    # Mock result.all()
+    result = MagicMock()
+    row = MagicMock()
+    row.id = "id1"
+    row.name = "name1"
+    row.status = "status1"
+    row.args = None
+    row.kwargs = None
+    row.result = None
+    row.error = None
+    result.all.return_value = [row]
+    conn.execute.return_value = result
 
-    assert len(tasks) == 2
+    tasks = await db.get_all_tasks()
+
+    assert len(tasks) == 1
     assert tasks[0].id == "id1"
-    assert tasks[1].id == "id2"

@@ -1,8 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "huey-dashboard"
 version = "0.1.0"
 description = "Huey Dashboard API"
 readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Greg Havekes" }
+]
 requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.135.1",
@@ -11,9 +19,16 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "python-dotenv>=1.2.2",
     "redis>=7.3.0",
+    "sqlalchemy[asyncio]>=2.0.38",
     "uvicorn[standard]>=0.41.0",
     "websockets>=16.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/ghavekes/huey-dashboard"
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [dependency-groups]
 dev = [

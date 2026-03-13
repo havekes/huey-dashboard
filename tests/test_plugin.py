@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -9,11 +9,21 @@ from huey_dashboard import init_huey_dashboard
 
 
 @pytest.fixture
-def mock_db():
-    conn = MagicMock()
-    cur = MagicMock()
-    conn.cursor.return_value.__enter__.return_value = cur
-    return conn
+def mock_db_engine():
+    engine = MagicMock()
+    conn = AsyncMock()
+
+    # Mock result of conn.execute
+    result = MagicMock()
+    result.all.return_value = []
+    result.first.return_value = None
+    conn.execute.return_value = result
+
+    # Mock engine.begin() and engine.connect() to return our mocked connection
+    engine.begin.return_value.__aenter__.return_value = conn
+    engine.connect.return_value.__aenter__.return_value = conn
+
+    return engine
 
 
 @pytest.fixture
@@ -24,28 +34,27 @@ def mock_huey():
     return huey
 
 
-def test_plugin_init_default_prefix(mock_huey, mock_db):
-    app = FastAPI()
-    # Mock return value for get_all_tasks
-    cur = mock_db.cursor.return_value.__enter__.return_value
-    cur.fetchall.return_value = []
+@pytest.fixture
+def mock_redis_pool():
+    return MagicMock()
 
-    init_huey_dashboard(app, huey=mock_huey, db_connection=mock_db)
+
+@pytest.mark.asyncio
+async def test_plugin_init_default_prefix(mock_huey, mock_db_engine):
+    app = FastAPI()
+    init_huey_dashboard(app, huey=mock_huey, db_engine=mock_db_engine)
 
     client = TestClient(app)
-    # Tasks endpoint should be at /huey/tasks/
     response = client.get("/huey/tasks/")
     assert response.status_code == 200
     assert response.json() == []
 
 
-def test_plugin_init_custom_prefix(mock_huey, mock_db):
+@pytest.mark.asyncio
+async def test_plugin_init_custom_prefix(mock_huey, mock_db_engine):
     app = FastAPI()
-    cur = mock_db.cursor.return_value.__enter__.return_value
-    cur.fetchall.return_value = []
-
     init_huey_dashboard(
-        app, huey=mock_huey, db_connection=mock_db, api_prefix="/admin/huey"
+        app, huey=mock_huey, db_engine=mock_db_engine, api_prefix="/admin/huey"
     )
 
     client = TestClient(app)
@@ -58,24 +67,30 @@ def test_plugin_init_custom_prefix(mock_huey, mock_db):
     assert response.status_code == 200
 
 
-def test_plugin_state_storage(mock_huey, mock_db):
+@pytest.mark.asyncio
+async def test_plugin_state_storage(mock_huey, mock_db_engine, mock_redis_pool):
     app = FastAPI()
-    mock_redis = MagicMock()
-    init_huey_dashboard(app, huey=mock_huey, db_connection=mock_db, redis=mock_redis)
+    init_huey_dashboard(
+        app,
+        huey=mock_huey,
+        db_engine=mock_db_engine,
+        redis_pool=mock_redis_pool,
+    )
 
     assert hasattr(app.state, "huey_dashboard")
     assert app.state.huey_dashboard["huey"] == mock_huey
-    assert app.state.huey_dashboard["redis"] == mock_redis
     assert "manager" in app.state.huey_dashboard
     assert "db" in app.state.huey_dashboard
+    assert app.state.huey_dashboard["redis"] is not None
 
 
-def test_plugin_websocket_endpoint(mock_huey, mock_db):
+@pytest.mark.asyncio
+async def test_plugin_websocket_endpoint(mock_huey, mock_db_engine):
     app = FastAPI()
-    init_huey_dashboard(app, huey=mock_huey, db_connection=mock_db, api_prefix="/huey")
+    init_huey_dashboard(
+        app, huey=mock_huey, db_engine=mock_db_engine, api_prefix="/huey"
+    )
 
     client = TestClient(app)
     with client.websocket_connect("/huey/updates/"):
-        # Note: Current websocket echo implementation in websockets.py might still exist
-        # We are just testing connection here.
         pass
