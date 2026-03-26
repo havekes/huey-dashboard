@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "huey-dashboard"
-version = "0.1.0"
+version = "0.0.1"
 description = "Huey Dashboard API"
 readme = "README.md"
 license = { text = "MIT" }
@@ -12,6 +12,14 @@ authors = [
     { name = "Greg Havekes" }
 ]
 requires-python = ">=3.14"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Monitoring",
+]
+keywords = ["huey", "dashboard", "monitoring", "tasks"]
 dependencies = [
     "fastapi>=0.135.1",
     "huey>=2.6.0",
@@ -25,7 +33,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/ghavekes/huey-dashboard"
+Repository = "https://github.com/havekes/huey-dashboard"
+
 
 [tool.setuptools.packages.find]
 where = ["src"]
