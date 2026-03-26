@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -18,7 +19,8 @@ def mock_engine():
 
 
 @pytest.mark.asyncio
-async def test_upsert_task(mock_engine):
+async def test_upsert_task(mock_engine, caplog):
+    caplog.set_level(logging.DEBUG)
     engine, conn = mock_engine
     db = TaskDatabase(engine)
     task = TaskInfo(id="test-id", name="test-task", status="enqueued")
@@ -27,10 +29,9 @@ async def test_upsert_task(mock_engine):
 
     # Check if execute was called on the connection
     assert conn.execute.call_count == 1
-    # Check it was called twice (once for create_all and once for upsert_task)
-    # Wait, in the test, engine.begin() returns conn.
-    # Actually, conn.run_sync(metadata.create_all) is called in ensure_table.
-    # conn.execute(update_stmt) is called in upsert_task.
+
+    # Verify log emission
+    assert f"Upserted task: {task.id} with status: {task.status}" in caplog.text
 
 
 @pytest.mark.asyncio

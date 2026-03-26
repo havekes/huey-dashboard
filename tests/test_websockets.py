@@ -1,4 +1,5 @@
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -49,6 +50,26 @@ def test_websocket_connect_and_disconnect(app, client):
 
     # After exiting the context, disconnect should be called
     assert manager.disconnect.called
+
+
+@pytest.mark.asyncio
+async def test_websocket_manager_logging(caplog):
+    caplog.set_level(logging.DEBUG)
+    manager = WebSocketManager()
+
+    # Test connect logging
+    ws = AsyncMock()
+    await manager.connect(ws)
+    assert "WebSocket client connected. Total active connections: 1" in caplog.text
+
+    # Test broadcast logging
+    message = {"event": "test"}
+    await manager.broadcast(message)
+    assert f"Broadcasting WebSocket message: {message}" in caplog.text
+
+    # Test disconnect logging
+    manager.disconnect(ws)
+    assert "WebSocket client disconnected. Total active connections: 0" in caplog.text
 
 
 @pytest.mark.asyncio

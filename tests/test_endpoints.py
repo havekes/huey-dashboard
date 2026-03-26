@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -25,6 +26,22 @@ def app():
 @pytest.fixture
 def client(app):
     return TestClient(app)
+
+
+def test_request_logging(app, client, caplog):
+    # Set level for the specific logger
+    logger = logging.getLogger("huey_dashboard.api.router")
+    logger.setLevel(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="huey_dashboard.api.router")
+
+    db = app.state.huey_dashboard["db"]
+    db.get_all_tasks = AsyncMock(return_value=[])
+
+    response = client.get("/tasks/")
+    assert response.status_code == 200
+
+    # Verify request log emission
+    assert "Dashboard API request: GET /tasks/" in caplog.text
 
 
 def test_list_tasks(app, client):

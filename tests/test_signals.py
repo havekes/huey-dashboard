@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -37,15 +39,20 @@ def mock_huey_and_handler():
 )
 @pytest.mark.asyncio
 async def test_signal_handler_various_signals(
-    mock_huey_and_handler, signal, expected_status
+    mock_huey_and_handler, signal, expected_status, caplog
 ):
+    caplog.set_level(logging.DEBUG)
     huey, get_handler = mock_huey_and_handler
     db = MagicMock()
     db.upsert_task = AsyncMock()
+    db.ensure_table = AsyncMock()
     redis = MagicMock()
     redis.publish = AsyncMock()
 
-    register_signal_handlers(huey, db, redis)
+    # Pass the current running loop explicitly so the handler schedules
+    # work on this loop (rather than creating a background thread).
+    loop = asyncio.get_running_loop()
+    register_signal_handlers(huey, db, redis, loop=loop)
     handler_fn = get_handler()
 
     task = MagicMock()
@@ -57,10 +64,14 @@ async def test_signal_handler_various_signals(
     exc = Exception("test error") if expected_status == "error" else None
     handler_fn(signal, task, exc=exc)
 
-    # Since handler_fn might use create_task, we might need a small sleep
-    import asyncio
-
+    # Give the scheduled coroutine time to run
     await asyncio.sleep(0.1)
+
+    # Verify log emission
+    assert (
+        f"Received Huey signal: {signal} (status={expected_status}) for task: {task.id}"
+        in caplog.text
+    )
 
     # Verify DB upsert
     assert db.upsert_task.call_count == 1
@@ -84,10 +95,12 @@ async def test_signal_handler_redis_failure_graceful(mock_huey_and_handler):
     huey, get_handler = mock_huey_and_handler
     db = MagicMock()
     db.upsert_task = AsyncMock()
+    db.ensure_table = AsyncMock()
     redis = MagicMock()
     redis.publish = AsyncMock(side_effect=Exception("Redis connection lost"))
 
-    register_signal_handlers(huey, db, redis)
+    loop = asyncio.get_running_loop()
+    register_signal_handlers(huey, db, redis, loop=loop)
     handler_fn = get_handler()
 
     task = MagicMock()
@@ -98,8 +111,6 @@ async def test_signal_handler_redis_failure_graceful(mock_huey_and_handler):
 
     # This should not raise an exception
     handler_fn("huey.signal.ENQUEUED", task)
-
-    import asyncio
 
     await asyncio.sleep(0.1)
 

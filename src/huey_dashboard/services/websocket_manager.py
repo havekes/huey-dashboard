@@ -1,9 +1,12 @@
 import asyncio
 import json
+import logging
 from typing import Any
 
 from fastapi import WebSocket
 from redis.asyncio import Redis
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketManager:
@@ -14,12 +17,21 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
         self.active_connections.append(websocket)
+        logger.debug(
+            "WebSocket client connected. Total active connections: %d",
+            len(self.active_connections),
+        )
 
     def disconnect(self, websocket: WebSocket) -> None:
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
+            logger.debug(
+                "WebSocket client disconnected. Total active connections: %d",
+                len(self.active_connections),
+            )
 
     async def broadcast(self, message: dict[str, Any]) -> None:
+        logger.debug("Broadcasting WebSocket message: %s", message)
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
@@ -62,4 +74,4 @@ class WebSocketManager:
                         pass
         finally:
             await pubsub.unsubscribe(channel)
-            await pubsub.close()
+            await pubsub.aclose()

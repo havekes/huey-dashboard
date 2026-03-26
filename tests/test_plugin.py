@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -6,24 +6,6 @@ from fastapi.testclient import TestClient
 from huey import RedisHuey
 
 from huey_dashboard import init_huey_dashboard
-
-
-@pytest.fixture
-def mock_db_engine():
-    engine = MagicMock()
-    conn = AsyncMock()
-
-    # Mock result of conn.execute
-    result = MagicMock()
-    result.all.return_value = []
-    result.first.return_value = None
-    conn.execute.return_value = result
-
-    # Mock engine.begin() and engine.connect() to return our mocked connection
-    engine.begin.return_value.__aenter__.return_value = conn
-    engine.connect.return_value.__aenter__.return_value = conn
-
-    return engine
 
 
 @pytest.fixture
@@ -35,14 +17,30 @@ def mock_huey():
 
 
 @pytest.fixture
-def mock_redis_pool():
-    return MagicMock()
+def mock_engine():
+    """Return a mocked AsyncEngine created by create_async_engine."""
+    engine = MagicMock()
+    conn = AsyncMock()
+
+    result = MagicMock()
+    result.all.return_value = []
+    result.first.return_value = None
+    conn.execute.return_value = result
+
+    engine.begin.return_value.__aenter__.return_value = conn
+    engine.connect.return_value.__aenter__.return_value = conn
+    return engine
+
+
+DB_URL = "sqlite+aiosqlite:///:memory:"
+REDIS_URL = "redis://localhost:6379/0"
 
 
 @pytest.mark.asyncio
-async def test_plugin_init_default_prefix(mock_huey, mock_db_engine):
+async def test_plugin_init_default_prefix(mock_huey, mock_engine):
     app = FastAPI()
-    init_huey_dashboard(app, huey=mock_huey, db_engine=mock_db_engine)
+    with patch("huey_dashboard.create_async_engine", return_value=mock_engine):
+        init_huey_dashboard(app, huey=mock_huey, db_url=DB_URL)
 
     client = TestClient(app)
     response = client.get("/huey/tasks/")
@@ -51,11 +49,12 @@ async def test_plugin_init_default_prefix(mock_huey, mock_db_engine):
 
 
 @pytest.mark.asyncio
-async def test_plugin_init_custom_prefix(mock_huey, mock_db_engine):
+async def test_plugin_init_custom_prefix(mock_huey, mock_engine):
     app = FastAPI()
-    init_huey_dashboard(
-        app, huey=mock_huey, db_engine=mock_db_engine, api_prefix="/admin/huey"
-    )
+    with patch("huey_dashboard.create_async_engine", return_value=mock_engine):
+        init_huey_dashboard(
+            app, huey=mock_huey, db_url=DB_URL, api_prefix="/admin/huey"
+        )
 
     client = TestClient(app)
     # Check that default prefix fails
@@ -68,14 +67,15 @@ async def test_plugin_init_custom_prefix(mock_huey, mock_db_engine):
 
 
 @pytest.mark.asyncio
-async def test_plugin_state_storage(mock_huey, mock_db_engine, mock_redis_pool):
+async def test_plugin_state_storage(mock_huey, mock_engine):
     app = FastAPI()
-    init_huey_dashboard(
-        app,
-        huey=mock_huey,
-        db_engine=mock_db_engine,
-        redis_pool=mock_redis_pool,
-    )
+    with patch("huey_dashboard.create_async_engine", return_value=mock_engine):
+        init_huey_dashboard(
+            app,
+            huey=mock_huey,
+            db_url=DB_URL,
+            redis_url=REDIS_URL,
+        )
 
     assert hasattr(app.state, "huey_dashboard")
     assert app.state.huey_dashboard["huey"] == mock_huey
@@ -85,11 +85,10 @@ async def test_plugin_state_storage(mock_huey, mock_db_engine, mock_redis_pool):
 
 
 @pytest.mark.asyncio
-async def test_plugin_websocket_endpoint(mock_huey, mock_db_engine):
+async def test_plugin_websocket_endpoint(mock_huey, mock_engine):
     app = FastAPI()
-    init_huey_dashboard(
-        app, huey=mock_huey, db_engine=mock_db_engine, api_prefix="/huey"
-    )
+    with patch("huey_dashboard.create_async_engine", return_value=mock_engine):
+        init_huey_dashboard(app, huey=mock_huey, db_url=DB_URL, api_prefix="/huey")
 
     client = TestClient(app)
     with client.websocket_connect("/huey/updates/"):

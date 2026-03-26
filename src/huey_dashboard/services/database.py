@@ -1,4 +1,5 @@
-import asyncio
+import logging
+import threading
 from datetime import UTC, datetime
 
 from sqlalchemy import (
@@ -14,6 +15,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from ..models.task import TaskInfo
+
+logger = logging.getLogger(__name__)
 
 metadata = MetaData()
 
@@ -38,35 +41,41 @@ class TaskDatabase:
         """
         self.engine = engine
         self._table_ensured = False
-        self._lock: asyncio.Lock | None = None
+        self._lock = threading.Lock()
 
     async def ensure_table(self) -> None:
         if self._table_ensured:
             return
 
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-
-        async with self._lock:
-            # Re-check after acquiring lock
+        # Double-check with a lock to avoid redundant creation attempts across threads.
+        # Note: We don't hold the threading lock across the 'await' call to avoid
+        # blocking other threads' event loops unnecessarily.
+        with self._lock:
             if self._table_ensured:
                 return
 
-            async with self.engine.begin() as conn:
-                await conn.run_sync(metadata.create_all)
-            self._table_ensured = True
+        async with self.engine.begin() as conn:
+            await conn.run_sync(metadata.create_all)
+
+        self._table_ensured = True
 
     async def upsert_task(self, task_info: TaskInfo) -> None:
         await self.ensure_table()
+        # Use Pydantic's model_dump(mode='json') to ensure all fields (like UUIDs)
+        # are converted to JSON-serializable types.
+        data = task_info.model_dump(mode="json")
+        logger.debug("Upserting task data: %s", data)
+
+        ts = task_info.timestamp or datetime.now(UTC)
         stmt = insert(huey_tasks).values(
-            id=task_info.id,
-            name=task_info.name,
-            status=task_info.status,
-            args=task_info.args,
-            kwargs=task_info.kwargs,
-            result=task_info.result,
-            error=task_info.error,
-            timestamp=datetime.now(UTC),
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            args=data["args"],
+            kwargs=data["kwargs"],
+            result=data["result"],
+            error=data["error"],
+            timestamp=ts,
         )
 
         update_stmt = stmt.on_conflict_do_update(
@@ -77,10 +86,17 @@ class TaskDatabase:
                 "error": stmt.excluded.error,
                 "timestamp": stmt.excluded.timestamp,
             },
+            where=(stmt.excluded.timestamp >= huey_tasks.c.timestamp),
         )
 
         async with self.engine.begin() as conn:
-            await conn.execute(update_stmt)
+            result = await conn.execute(update_stmt)
+            logger.info(
+                "Upserted task: %s with status: %s (rowcount: %s)",
+                task_info.id,
+                task_info.status,
+                result.rowcount,
+            )
 
     async def get_all_tasks(self) -> list[TaskInfo]:
         await self.ensure_table()
@@ -100,6 +116,7 @@ class TaskDatabase:
                     kwargs=row.kwargs,
                     result=row.result,
                     error=row.error,
+                    timestamp=row.timestamp,
                 )
             )
         return tasks
@@ -122,4 +139,5 @@ class TaskDatabase:
             kwargs=row.kwargs,
             result=row.result,
             error=row.error,
+            timestamp=row.timestamp,
         )
